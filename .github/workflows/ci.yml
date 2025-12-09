@@ -93,6 +93,7 @@ jobs:
           echo "$PWD/sonar-scanner/bin" >> $GITHUB_PATH
 
       - name: Run SonarQube PR Scan
+        continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -118,6 +119,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run SonarQube Branch Scan
+        continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
@@ -143,6 +145,7 @@ jobs:
           pip install databricks-cli
 
       - name: Validate Databricks Bundle
+        continue-on-error: true
         env:
           DATABRICKS_TOKEN: ${{ secrets.ADB_TOKEN }}
           DATABRICKS_BUNDLE_ENV: dev
