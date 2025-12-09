@@ -1,0 +1,141 @@
+name: data-platform-ci
+
+on:
+  pull_request:
+    branches: [ develop, main, qa ]
+  push:
+    branches: [ develop, main, qa ]
+
+env:
+  PYTHON_VERSION: "3.12"
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+  ADB_TOKEN: ${{ secrets.ADB_TOKEN }}
+
+jobs:
+
+  ###########################################################################
+  # 1. Branch Validation (PR only)
+  ###########################################################################
+  branch_validation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch naming rules
+        run: |
+          branch="${GITHUB_HEAD_REF}"
+
+          echo "Branch: $branch"
+
+          regex='^(main|develop|master|(Feature|feature|Release|release|Hotfix|hotfix|revert-[0-9]*-[a-zA-Z]*)(/[a-zA-Z0-9]+([-_][a-zA-Z0-9]+)*){1,4})$'
+
+          if [[ ! "$branch" =~ $regex ]]; then
+            echo "❌ Invalid branch name."
+            echo "Refer: https://mbusa.atlassian.net/wiki/spaces/DAPS/pages/529432588/Allowed+and+Denied+Branch+Name+For+Pre-Merge+Validation+Check"
+            exit 1
+          else
+            echo "✅ Branch name is valid."
+          fi
+
+  ###########################################################################
+  # 2. Test + Coverage (always runs)
+  ###########################################################################
+  test:
+    runs-on: ubuntu-latest
+    needs: branch_validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # Needed for PR diff analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pip, poetry & deps
+        run: |
+          python -m pip install --upgrade pip pipx tomli
+          pipx install poetry==1.8.5 --force
+          poetry install
+
+      - name: Run tests
+        run: |
+          make test-with-coverage DOMAIN=${{ github.event.pull_request.head.ref || 'local' }}
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            htmlcov
+
+  ###########################################################################
+  # 3. SonarQube Scan (PR mode)
+  ###########################################################################
+  sonar_pr:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SonarQube PR Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          sonar-scanner \
+            -Dsonar.projectKey=data-platform \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
+            -Dsonar.login=$SONAR_TOKEN \
+            -Dsonar.python.coverage.reportPaths=coverage.xml \
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
+            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+  ###########################################################################
+  # 4. SonarQube Scan (Branch builds)
+  ###########################################################################
+  sonar_branch:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run SonarQube Branch Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          sonar-scanner \
+            -Dsonar.projectKey=data-platform \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
+            -Dsonar.login=$SONAR_TOKEN \
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+
+  ###########################################################################
+  # 5. Databricks Bundle Validation
+  ###########################################################################
+  validate_databricks:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        run: |
+          pip install databricks-cli
+
+      - name: Validate Databricks Bundle
+        env:
+          DATABRICKS_TOKEN: ${{ secrets.ADB_TOKEN }}
+          DATABRICKS_BUNDLE_ENV: dev
+        run: |
+          make install-databricks-cli
+          make validate-domain DOMAIN=${{ github.event.pull_request.head.ref || 'local' }}

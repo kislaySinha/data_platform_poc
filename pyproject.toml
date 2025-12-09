@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "sample-data-platform"
+version = "0.1.0"
+description = "Sample project for CI pipeline testing"
+authors = ["Your Name <you@example.com>"]
+packages = [{ include = "sample", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+coverage = "^7.0"
+
+[tool.coverage.run]
+branch = true
+source = ["sample"]
+
+[tool.coverage.report]
+fail_under = 50
+show_missing = true
